@@ -1,4 +1,29 @@
 import dotenv from 'dotenv';
+import net from 'net';
+
+const KNOWN_PROXY_KEYWORDS = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+function isValidTrustProxyAddress(val: string): boolean {
+  if (KNOWN_PROXY_KEYWORDS.has(val.toLowerCase())) {
+    return true;
+  }
+  const cidrMatch = val.match(/^([^/]+)\/(\d+)$/);
+  if (cidrMatch) {
+    const ip = cidrMatch[1];
+    const mask = parseInt(cidrMatch[2], 10);
+    const ipType = net.isIP(ip);
+    if (ipType === 4 && mask >= 0 && mask <= 32) return true;
+    if (ipType === 6 && mask >= 0 && mask <= 128) return true;
+    return false;
+  }
+  return net.isIP(val) !== 0;
+}
+
+function isValidTrustProxy(val: string): boolean {
+  const parts = val.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return false;
+  return parts.every(isValidTrustProxyAddress);
+}
 
 // Load environment variables from .env file
 dotenv.config();
@@ -20,6 +45,7 @@ export interface EnvironmentConfig {
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_CALLBACK_URL?: string;
   IS_GOOGLE_AUTH_CONFIGURED: boolean;
+  TRUST_PROXY: boolean | number | string;
 }
 
 /**
@@ -141,6 +167,25 @@ function validateEnv(): EnvironmentConfig {
     }
   }
 
+  // Validate TRUST_PROXY (optional, defaults to false)
+  const rawTrustProxy = process.env.TRUST_PROXY?.trim();
+  let trustProxy: boolean | number | string = false;
+  if (rawTrustProxy !== undefined && rawTrustProxy !== '') {
+    if (rawTrustProxy === 'true') {
+      trustProxy = true;
+    } else if (rawTrustProxy === 'false') {
+      trustProxy = false;
+    } else if (/^\d+$/.test(rawTrustProxy)) {
+      trustProxy = parseInt(rawTrustProxy, 10);
+    } else if (isValidTrustProxy(rawTrustProxy)) {
+      trustProxy = rawTrustProxy;
+    } else {
+      errors.push(
+        `Invalid TRUST_PROXY "${rawTrustProxy}". Must be a boolean ("true"/"false"), a hop count integer (e.g. 1), a predefined subnet ("loopback", "linklocal", "uniquelocal"), or a valid IP/CIDR address list.`
+      );
+    }
+  }
+
   if (errors.length > 0) {
     // Provide a sanitized error message that never reveals secrets
     throw new Error(
@@ -165,6 +210,7 @@ function validateEnv(): EnvironmentConfig {
     GOOGLE_CLIENT_SECRET: rawGoogleClientSecret,
     GOOGLE_CALLBACK_URL: rawGoogleCallbackUrl,
     IS_GOOGLE_AUTH_CONFIGURED: isGoogleAuthConfigured,
+    TRUST_PROXY: trustProxy,
   };
 }
 

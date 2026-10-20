@@ -15,6 +15,11 @@ import { errorHandler } from './middleware/errorHandler.js';
 export function createApp(): Express {
   const app = express();
 
+  // Configuration: Reverse proxy trust (ALB, NGINX, Cloudflare, etc.)
+  if (env.TRUST_PROXY !== false) {
+    app.set('trust proxy', env.TRUST_PROXY);
+  }
+
   // Middleware: Request logging
   app.use(requestLogger);
 

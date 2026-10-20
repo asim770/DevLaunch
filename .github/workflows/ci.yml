@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node-version: [24.x, 22.x]
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Verify Root Extension (Compile, Lint & Test)
+        run: |
+          npm run compile
+          npm run lint
+          xvfb-run -a npm test
+
+      - name: Install Frontend Dependencies
+        working-directory: templates/frontend
+        run: npm ci
+
+      - name: Verify Frontend Production Build
+        working-directory: templates/frontend
+        run: npm run build
+
+      - name: Install Backend Dependencies
+        working-directory: templates/backend
+        run: npm ci
+
+      - name: Verify Backend Typecheck & Build
+        working-directory: templates/backend
+        run: |
+          npm run typecheck
+          npm run build
+
+      - name: Verify Backend Database Index Script
+        working-directory: templates/backend
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017/devlaunch_ci_indexes
+        run: npm run db:indexes
+
+      - name: Run Backend Test Suite on Node ${{ matrix.node-version }}
+        working-directory: templates/backend
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017/devlaunch_ci
+          JWT_SECRET: devlaunch_ci_jwt_secret_min_32_characters_long
+          CLIENT_URL: http://localhost:3000
+          NODE_ENV: test
+        run: npm test
